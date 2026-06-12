@@ -26,6 +26,7 @@ import TransferModal from "./TransferModal"
 import BankEntryModal from "./BankEntryModal"
 import RecordPaymentModal from "./RecordPaymentModal"
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import SelectedTransactionsTable from "./SelectedTransactionsTable"
 import MatchFilters from "./MatchFilters"
 import { useHotkeys } from "react-hotkeys-hook"
@@ -105,7 +106,7 @@ const UnreconciledTransactions = ({ contentHeight }: { contentHeight: number }) 
 
     }, [searchIndex, search, typeFilter, amountFilter.value, unreconciledTransactions?.message])
 
-    const setSelectedTransaction = useSetAtom(bankRecSelectedTransactionAtom(bankAccount?.name || ''))
+    const [selectedTransaction, setSelectedTransaction] = useAtom(bankRecSelectedTransactionAtom(bankAccount?.name || ''))
 
     const onFilterChange = () => {
         setSelectedTransaction([])
@@ -210,6 +211,44 @@ const UnreconciledTransactions = ({ contentHeight }: { contentHeight: number }) 
             text={hasFilters ? _("No transactions found for the given filters.") : _("No unreconciled transactions found")}
             description={hasFilters ? _("Try adjusting your search or filter criteria.") : _("Import your bank statement to get started.")} />}
 
+        {results.length > 0 && (
+            <div className="flex items-center gap-2 px-2 py-1">
+                <Checkbox
+                    checked={
+                        selectedTransaction.length > 0 && selectedTransaction.length === results.length
+                            ? true
+                            : selectedTransaction.length > 0
+                                ? "indeterminate"
+                                : false
+                    }
+                    onCheckedChange={() => {
+                        if (selectedTransaction.length === results.length) {
+                            setSelectedTransaction([])
+                        } else {
+                            setSelectedTransaction([...results])
+                        }
+                    }}
+                />
+                {selectedTransaction.length > 0 ? (
+                    <>
+                        <span className="text-sm text-muted-foreground">
+                            {selectedTransaction.length} {_("selected")}
+                        </span>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto py-0 px-1 text-xs text-muted-foreground hover:text-foreground"
+                            onClick={() => setSelectedTransaction([])}
+                        >
+                            {_("Clear")}
+                        </Button>
+                    </>
+                ) : (
+                    <span className="text-sm text-muted-foreground">{_("Select all")}</span>
+                )}
+            </div>
+        )}
+
         <Virtuoso
             data={results}
             itemContent={(_index, transaction) => (
@@ -278,6 +317,14 @@ const UnreconciledTransactionItem = ({ transaction }: { transaction: Unreconcile
         }
     }
 
+    const handleCheckboxToggle = () => {
+        setSelectedTransaction(
+            isSelected
+                ? selectedTransaction.filter((t) => t.name !== transaction.name)
+                : [...selectedTransaction, transaction]
+        )
+    }
+
     return <div className="py-0.5">
         <div className={cn("border rounded-md m-1 p-2 cursor-pointer transition-[color,box-shadow, bg]",
             isSelected ? "border-primary bg-primary-foreground outline-ring outline-1" : "border-border outline-none bg-card hover:bg-accent/40"
@@ -285,30 +332,35 @@ const UnreconciledTransactionItem = ({ transaction }: { transaction: Unreconcile
             role='button'
             tabIndex={0}
             onClick={handleSelectTransaction}>
-            <div className="flex justify-between items-start w-full">
-                <div className="space-y-1">
-                    <div className="flex items-center gap-1">
-                        <span className="font-semibold text-sm">{formatDate(transaction.date)}</span>
-                        {transaction.transaction_type &&
-                            <Badge variant='secondary' className="text-xs py-0.5 px-1 rounded-sm bg-secondary">{transaction.transaction_type}</Badge>}
-                        {transaction.reference_number && <Badge
-                            title={transaction.reference_number}
-                            className="inline-block max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap bg-primary-foreground rounded-sm text-primary"
-                        >
-                            {_("Ref")}: {transaction.reference_number}</Badge>}
-
-                        {transaction.matched_rule && <Badge
-                            variant='secondary'
-                            title={_("Matched by rule")}
-                            className="text-xs py-0.5 px-1 rounded-sm bg-primary-foreground text-primary">
-                            <ZapIcon className="w-4 h-4" /> {transaction.matched_rule}</Badge>}
-                    </div>
-                    <span className="text-sm">{transaction.description}</span>
+            <div className="flex items-start gap-3 w-full">
+                <div className="pt-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox checked={isSelected} onCheckedChange={handleCheckboxToggle} />
                 </div>
-                <div className="gap-1 flex flex-col items-end min-w-36 h-full text-right">
-                    {isWithdrawal ? <ArrowUpRight className="w-6 h-6 text-destructive" /> : <ArrowDownRight className="w-6 h-6 text-green-600" />}
-                    {amount && amount > 0 && <span className="font-semibold font-mono text-md">{formatCurrency(amount, currency)}</span>}
-                    {amount !== transaction.unallocated_amount && <span className="text-xs text-gray-700">{formatCurrency(transaction.unallocated_amount, currency)}<br />{_("Unallocated")}</span>}
+                <div className="flex justify-between items-start w-full">
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1">
+                            <span className="font-semibold text-sm">{formatDate(transaction.date)}</span>
+                            {transaction.transaction_type &&
+                                <Badge variant='secondary' className="text-xs py-0.5 px-1 rounded-sm bg-secondary">{transaction.transaction_type}</Badge>}
+                            {transaction.reference_number && <Badge
+                                title={transaction.reference_number}
+                                className="inline-block max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap bg-primary-foreground rounded-sm text-primary"
+                            >
+                                {_("Ref")}: {transaction.reference_number}</Badge>}
+
+                            {transaction.matched_rule && <Badge
+                                variant='secondary'
+                                title={_("Matched by rule")}
+                                className="text-xs py-0.5 px-1 rounded-sm bg-primary-foreground text-primary">
+                                <ZapIcon className="w-4 h-4" /> {transaction.matched_rule}</Badge>}
+                        </div>
+                        <span className="text-sm">{transaction.description}</span>
+                    </div>
+                    <div className="gap-1 flex flex-col items-end min-w-36 h-full text-right">
+                        {isWithdrawal ? <ArrowUpRight className="w-6 h-6 text-destructive" /> : <ArrowDownRight className="w-6 h-6 text-green-600" />}
+                        {amount && amount > 0 && <span className="font-semibold font-mono text-md">{formatCurrency(amount, currency)}</span>}
+                        {amount !== transaction.unallocated_amount && <span className="text-xs text-gray-700">{formatCurrency(transaction.unallocated_amount, currency)}<br />{_("Unallocated")}</span>}
+                    </div>
                 </div>
             </div>
         </div>
