@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import SelectedTransactionDetails from "./SelectedTransactionDetails"
 import { AccountFormField, CurrencyFormField, DataField, DateField, LinkFormField, PartyTypeFormField, SmallTextField } from "@/components/ui/form-elements"
 import { Form } from "@/components/ui/form"
-import { useCallback, useContext, useMemo, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ArrowDownRight, ArrowUpRight, Plus, Trash2 } from "lucide-react"
@@ -72,12 +72,18 @@ const RecordBankEntryModalContent = () => {
 const BulkBankEntryForm = ({ selectedTransactions }: { selectedTransactions: UnreconciledTransaction[] }) => {
 
     const form = useForm<{
-        account: string
+        account: string,
+        party_type: string,
+        party: string,
     }>({
         defaultValues: {
-            account: ''
+            account: '',
+            party_type: '',
+            party: '',
         }
     })
+
+    const { call: frappeCall } = useContext(FrappeContext) as FrappeConfig
 
     const { call, loading, error } = useFrappePostCall<{ message: { transaction: BankTransaction, journal_entry: JournalEntry }[] }>('mint.apis.bank_reconciliation.create_bulk_bank_entry_and_reconcile')
 
@@ -86,11 +92,37 @@ const BulkBankEntryForm = ({ selectedTransactions }: { selectedTransactions: Unr
 
     const setIsOpen = useSetAtom(bankRecRecordJournalEntryModalAtom)
 
-    const onSubmit = (data: { account: string }) => {
+    const party_type = form.watch('party_type')
+    const party = form.watch('party')
+    const company = selectedTransactions[0]?.company ?? ''
+
+    // Auto-fill account from party when party changes
+    useEffect(() => {
+        if (party && party_type && company) {
+            frappeCall.get('mint.apis.bank_reconciliation.get_party_details', {
+                company,
+                party_type,
+                party,
+            }).then((result: { message: { party_account: string } }) => {
+                form.setValue('account', result.message.party_account)
+            })
+        }
+    }, [party, party_type, company])
+
+    // Clear party and account when party_type is cleared
+    useEffect(() => {
+        if (!party_type) {
+            form.setValue('party', '')
+            form.setValue('account', '')
+        }
+    }, [party_type])
+
+    const onSubmit = (data: { account: string, party_type: string, party: string }) => {
 
         call({
             bank_transactions: selectedTransactions.map(transaction => transaction.name),
-            account: data.account
+            account: data.account,
+            ...(data.party_type && data.party ? { party_type: data.party_type, party: data.party } : {}),
         }).then(({ message }) => {
 
             addToActionLog({
@@ -128,10 +160,27 @@ const BulkBankEntryForm = ({ selectedTransactions }: { selectedTransactions: Unr
                 <SelectedTransactionsTable />
 
                 <div className="grid grid-cols-3 gap-4">
+                    <PartyTypeFormField
+                        name='party_type'
+                        label={_('Party Type')}
+                        inputProps={{
+                            triggerProps: { className: 'w-full' }
+                        }}
+                    />
+                    {party_type && (
+                        <LinkFormField
+                            name='party'
+                            label={_('Party')}
+                            doctype={party_type}
+                            buttonClassName='w-full'
+                        />
+                    )}
                     <AccountFormField
                         name='account'
                         filterFunction={(acc) => {
-                            // Do not allow payable and receivable accounts
+                            if (party_type) {
+                                return true
+                            }
                             return acc.account_type !== 'Payable' && acc.account_type !== 'Receivable'
                         }}
                         label={_('Account')}
