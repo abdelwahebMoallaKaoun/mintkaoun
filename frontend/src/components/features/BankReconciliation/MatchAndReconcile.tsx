@@ -856,6 +856,7 @@ const VoucherItem = ({ voucher, index }: { voucher: LinkedPayment, index: number
                             href={`/app/${slug(voucher.party_type)}/${voucher.party}`}
                             className="underline underline-offset-2 font-medium"
                         >{voucher.party}</a>
+                        {voucher.party_name && <span className="text-muted-foreground">— {voucher.party_name}</span>}
                     </div>}
                     <TooltipProvider>
                         <div className="flex items-center gap-1">

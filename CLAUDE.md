@@ -29,6 +29,16 @@ yarn dev        # Delegates to frontend/
 yarn build      # Delegates to frontend/
 ```
 
+## Versioning & releases
+
+The version follows [Semantic Versioning](https://semver.org/). The single source of truth is `__version__` in `mint/__init__.py` — `pyproject.toml` reads it dynamically via flit (`dynamic = ["version"]`). Both `package.json` files are kept in sync with it, and notable changes are recorded in `CHANGELOG.md` (Keep a Changelog format) under `## [Unreleased]`.
+
+To cut a release, run from the repo root:
+```bash
+python scripts/bump_version.py patch     # or: minor | major | an explicit X.Y.Z
+```
+This updates all version files, moves the `[Unreleased]` changelog entries under the new version with today's date, then creates a `chore: release v<version>` commit and an annotated `v<version>` git tag. Push with `git push && git push origin v<version>`. Use `--no-git` to edit files only, or `--dry-run` to preview.
+
 ## Architecture
 
 ### Two-layer structure

@@ -107,6 +107,7 @@ export interface LinkedPayment {
     posting_date: string,
     party_type?: string,
     party?: string,
+    party_name?: string,
     currency: string
 }
 
@@ -128,7 +129,7 @@ export const useGetVouchersForTransaction = (transaction: UnreconciledTransactio
 
     const matchFilters = useAtomValue(bankRecMatchFilters)
 
-    return useFrappeGetCall<{ message: LinkedPayment[] }>('erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool.get_linked_payments', {
+    return useFrappeGetCall<{ message: LinkedPayment[] }>('mint.apis.bank_reconciliation.get_linked_payments', {
         bank_transaction_name: transaction.name,
         document_types: matchFilters ?? ['payment_entry', 'journal_entry'],
         from_date: dates.fromDate,

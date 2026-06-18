@@ -2,7 +2,11 @@ import frappe
 from frappe import _
 import json
 import datetime
-from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import create_payment_entry_bts, create_journal_entry_bts
+from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import (
+    create_payment_entry_bts,
+    create_journal_entry_bts,
+    get_linked_payments as _get_linked_payments,
+)
 from erpnext.accounts.party import get_party_account
 from erpnext import get_default_cost_center
 
@@ -455,6 +459,34 @@ def get_account_defaults(account: str):
     company, report_type = frappe.db.get_value("Account", account, ["company", "report_type"])
 
     return get_default_cost_center(company) if report_type == "Profit and Loss" else  ""
+
+
+@frappe.whitelist()
+def get_linked_payments(bank_transaction_name, document_types=None, from_date=None,
+                        to_date=None, filter_by_reference_date=None,
+                        from_amount=None, to_amount=None):
+    """
+        Wrap ERPNext's get_linked_payments and enrich each result with the
+        party's display name (e.g. customer_name / supplier_name) so the
+        reconciliation UI can show the name next to the party code.
+    """
+    payments = _get_linked_payments(
+        bank_transaction_name, document_types, from_date, to_date,
+        filter_by_reference_date, from_amount, to_amount,
+    )
+
+    name_cache = {}
+    for p in payments:
+        party_type, party = p.get("party_type"), p.get("party")
+        if not (party_type and party):
+            continue
+        key = (party_type, party)
+        if key not in name_cache:
+            field = "title" if party_type == "Shareholder" else party_type.lower() + "_name"
+            name_cache[key] = frappe.db.get_value(party_type, party, field)
+        p["party_name"] = name_cache[key]
+
+    return payments
 
 
 @frappe.whitelist(methods=["GET"])
