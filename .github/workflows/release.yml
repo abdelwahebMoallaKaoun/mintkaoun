@@ -1,0 +1,52 @@
+name: Release
+
+# Create a GitHub Release whenever a v* tag is pushed (e.g. by scripts/bump_version.py).
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract changelog section for this tag
+        id: notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          # Pull the lines for "## [<version>]" up to (but not including) the next
+          # "## [" heading, trimming leading and trailing blank lines.
+          notes="$(awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" { capture = 1; next }
+            capture && /^## \[/ { exit }
+            capture {
+              if (!started && $0 ~ /^[[:space:]]*$/) next
+              started = 1
+              buf[n++] = $0
+            }
+            END {
+              while (n > 0 && buf[n-1] ~ /^[[:space:]]*$/) n--
+              for (i = 0; i < n; i++) print buf[i]
+            }
+          ' CHANGELOG.md)"
+          if [ -z "$notes" ]; then
+            notes="Release ${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "body<<EOF"
+            echo "$notes"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "${{ steps.notes.outputs.body }}"
