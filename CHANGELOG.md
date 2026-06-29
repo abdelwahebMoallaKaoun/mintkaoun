@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-06-29
+
 ### Added
 - Support 3-decimal currency precision across the reconciliation screen (display, amount inputs, balances and statement importer). Precision now honors Frappe's `currency_precision` system default and falls back to 3 decimals when it is unset, so existing 2-decimal amounts display with a trailing zero (e.g. `10.12` → `10.120`).
 
@@ -20,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Baseline version. Changes prior to the introduction of this changelog are not itemized.
 
-[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.4...HEAD
+[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.4...v1.6.0
 [1.5.4]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.3...v1.5.4
 [1.5.3]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/releases/tag/v1.5.3
