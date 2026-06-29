@@ -4,7 +4,7 @@ import { bankRecDateAtom, bankRecUnreconcileModalAtom, selectedBankAccountAtom }
 import { Paragraph } from "@/components/ui/typography"
 import { formatDate } from "@/lib/date"
 import { Table, TableBody, TableCell, TableHead, TableRow } from "@/components/ui/table"
-import { formatCurrency, getCurrencyFormatInfo } from "@/lib/numbers"
+import { formatCurrency, getCurrencyFormatInfo, getCurrencyPrecision } from "@/lib/numbers"
 import { getCompanyCurrency } from "@/lib/company"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { ArrowDownRight, ArrowUpRight, CheckCircle2, ChevronDown, DollarSign, ExternalLink, ImportIcon, ListIcon, Search, Undo2, XCircle } from "lucide-react"
@@ -263,6 +263,7 @@ const Filters = ({
     const formatInfo = getCurrencyFormatInfo(currency)
     const groupSeparator = formatInfo.group_sep || ","
     const decimalSeparator = formatInfo.decimal_str || "."
+    const currencyPrecision = getCurrencyPrecision()
 
     return <div className="flex py-2 w-full gap-2">
         <label className="sr-only">{_("Search transactions")}</label>
@@ -282,11 +283,11 @@ const Filters = ({
             <CurrencyInput
                 groupSeparator={groupSeparator}
                 decimalSeparator={decimalSeparator}
-                placeholder={`${currencySymbol}0${decimalSeparator}00`}
-                decimalsLimit={2}
+                placeholder={`${currencySymbol}0${decimalSeparator}${"0".repeat(currencyPrecision)}`}
+                decimalsLimit={currencyPrecision}
                 value={amountFilter.stringValue}
                 maxLength={12}
-                decimalScale={2}
+                decimalScale={currencyPrecision}
                 prefix={currencySymbol}
                 onValueChange={(v, _n, values) => {
                     // If the input ends with a decimal or a decimal with trailing zeroes, store the string since we need the user to be able to type the decimals.

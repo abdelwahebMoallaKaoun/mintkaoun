@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { H1, H3, Paragraph } from "@/components/ui/typography"
 import { useCurrentCompany } from "@/hooks/useCurrentCompany"
 import { formatDate } from "@/lib/date"
-import { flt, formatCurrency } from "@/lib/numbers"
+import { flt, formatCurrency, getCurrencyPrecision } from "@/lib/numbers"
 import _ from "@/lib/translate"
 import { cn } from "@/lib/utils"
 import { MintBankStatementImportLog } from "@/types/Mint/MintBankStatementImportLog"
@@ -241,7 +241,7 @@ const StatementImportLog = () => {
                                 <TableCell>{formatDate(item.creation, 'Do MMM YYYY')}</TableCell>
                                 <TableCell>{formatDate(item.start_date, 'Do MMM YYYY')} to {formatDate(item.end_date, 'Do MMM YYYY')}</TableCell>
                                 <TableCell className="text-right">{item.number_of_transactions}</TableCell>
-                                <TableCell className="text-right font-mono">{formatCurrency(flt(item.closing_balance, 2))}</TableCell>
+                                <TableCell className="text-right font-mono">{formatCurrency(flt(item.closing_balance, getCurrencyPrecision()))}</TableCell>
                                 <TableCell><a
                                     href={item.file}
                                     target="_blank" className="underline underline-offset-4">{item.file.split('/').pop()}</a></TableCell>

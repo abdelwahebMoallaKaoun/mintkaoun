@@ -4,7 +4,7 @@ import { FrappeConfig, FrappeContext, useFrappeGetDocCount, useFrappeGetDocList,
 import { BankTransaction } from "@/types/Accounts/BankTransaction"
 import { Progress } from "@/components/ui/progress"
 import { useGetAccountClosingBalance, useGetAccountClosingBalanceAsPerStatement, useGetAccountOpeningBalance, useGetUnreconciledTransactions } from "./utils"
-import { flt, formatCurrency } from "@/lib/numbers"
+import { flt, formatCurrency, getCurrencyPrecision } from "@/lib/numbers"
 import { Skeleton } from "@/components/ui/skeleton"
 import { StatContainer, StatLabel, StatValue } from "@/components/ui/stats"
 import { Edit, Info, Trash2 } from "lucide-react"
@@ -53,7 +53,7 @@ const OpeningBalance = () => {
 
     return <StatContainer className="min-w-48">
         <StatLabel>{_("Opening Balance")}</StatLabel>
-        {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message, 2), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
+        {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message, getCurrencyPrecision()), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
     </StatContainer>
 }
 
@@ -86,7 +86,7 @@ const ClosingBalance = () => {
                 </HoverCard>
 
             </div>
-            {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message, 2), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
+            {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message, getCurrencyPrecision()), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
         </StatContainer>
     )
 }
@@ -98,7 +98,7 @@ const Difference = () => {
 
     const value = useAtomValue(bankRecClosingBalanceAtom(bankAccount?.name ?? ''))
 
-    const difference = flt(value.value - (data?.message ?? 0))
+    const difference = flt(value.value - (data?.message ?? 0), getCurrencyPrecision())
 
     const isError = difference !== 0
 
@@ -172,7 +172,7 @@ const ClosingBalanceAsPerStatement = () => {
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <div className="flex items-center gap-4 underline cursor-pointer underline-offset-6">
-                                {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message?.balance, 2), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
+                                {isLoading ? <Skeleton className="w-[150px] h-9" /> : <StatValue className="font-mono">{formatCurrency(flt(data?.message?.balance, getCurrencyPrecision()), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</StatValue>}
                                 <Edit className="w-4 h-4" />
                             </div>
                         </TooltipTrigger>
@@ -312,7 +312,7 @@ const ClosingBalancesList = ({ bankAccount, date }: { bankAccount: SelectedBank 
                 {data?.map((item) => (
                     <TableRow key={item.name}>
                         <TableCell>{formatDate(item.date, 'Do MMM YYYY')}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(flt(item.balance, 2), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</TableCell>
+                        <TableCell className="text-right">{formatCurrency(flt(item.balance, getCurrencyPrecision()), bankAccount?.account_currency ?? getCompanyCurrency(bankAccount?.company ?? ''))}</TableCell>
                         <TableCell className="text-right">
                             <Button
                                 title={_("Delete")}
