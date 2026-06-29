@@ -3,7 +3,18 @@ import { getCurrencyNumberFormat, getCurrencyProperty, getCurrencySymbol } from 
 import { getSystemDefault } from "./frappe";
 import _ from "./translate";
 
-export const formatCurrency = (value?: number, currency: string = '', decimals: number = 2) => {
+/**
+ * The number of decimal places used to display and accept monetary amounts.
+ *
+ * Honors Frappe's `currency_precision` system default when it is explicitly set,
+ * and falls back to 3 so the reconciliation screen supports 3-decimal precision
+ * out of the box (see ACC-1179).
+ */
+export const getCurrencyPrecision = (): number => {
+    return cint(getSystemDefault('currency_precision')) || 3
+}
+
+export const formatCurrency = (value?: number, currency: string = '', decimals?: number) => {
 
     if (!value) {
         value = 0
@@ -18,7 +29,7 @@ export const formatCurrency = (value?: number, currency: string = '', decimals: 
     const show_symbol_on_right = getCurrencyProperty(currency, 'symbol_on_right') ?? false;
 
     if (decimals === undefined) {
-        decimals = getSystemDefault('currency_precision') || null;
+        decimals = getCurrencyPrecision();
     }
 
     if (symbol) {

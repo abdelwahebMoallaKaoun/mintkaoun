@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Support 3-decimal currency precision across the reconciliation screen (display, amount inputs, balances and statement importer). Precision now honors Frappe's `currency_precision` system default and falls back to 3 decimals when it is unset, so existing 2-decimal amounts display with a trailing zero (e.g. `10.12` → `10.120`).
+
 ## [1.5.4] - 2026-06-18
 
 ### Added

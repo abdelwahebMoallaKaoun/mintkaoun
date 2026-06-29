@@ -16,7 +16,7 @@ import { ChangeEvent, useCallback, useContext, useEffect, useMemo, useState } fr
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AlertCircleIcon, Plus, Trash2 } from "lucide-react"
-import { flt, formatCurrency } from "@/lib/numbers"
+import { flt, formatCurrency, getCurrencyPrecision } from "@/lib/numbers"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { PaymentEntry } from "@/types/Accounts/PaymentEntry"
@@ -776,7 +776,7 @@ const DifferenceButton = ({ index, currency }: { index: number, currency: string
         name: `references.${index}.allocated_amount`
     }) ?? 0
 
-    const difference = flt(outstandingAmount - allocatedAmount, 2)
+    const difference = flt(outstandingAmount - allocatedAmount, getCurrencyPrecision())
 
     const onPayInFull = useCallback(() => {
         setValue(`references.${index}.allocated_amount`, outstandingAmount, { shouldDirty: true })

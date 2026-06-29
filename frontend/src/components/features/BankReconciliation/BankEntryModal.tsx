@@ -17,7 +17,7 @@ import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "r
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ArrowDownRight, ArrowUpRight, Plus, Trash2 } from "lucide-react"
-import { flt, formatCurrency } from "@/lib/numbers"
+import { flt, formatCurrency, getCurrencyPrecision } from "@/lib/numbers"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import SelectedTransactionsTable from "./SelectedTransactionsTable"
@@ -271,7 +271,7 @@ const BankEntryForm = ({ selectedTransaction }: { selectedTransaction: Unreconci
                     // If it's the last row, add the difference amount
                     if (i === (rule.accounts?.length ?? 0) - 1 && !hasTotallyEmptyRowEarlier) {
 
-                        const differenceAmount = flt(totalDebits - totalCredits, 2)
+                        const differenceAmount = flt(totalDebits - totalCredits, getCurrencyPrecision())
                         accounts.push({
                             account: acc?.account ?? '',
                             debit: differenceAmount > 0 ? 0 : Math.abs(differenceAmount),
@@ -311,11 +311,11 @@ const BankEntryForm = ({ selectedTransaction }: { selectedTransaction: Unreconci
                             hasTotallyEmptyRowEarlier = true;
                         }
 
-                        const computedDebit = acc?.debit ? flt(computeExpression(acc.debit), 2) : 0
-                        const computedCredit = acc?.credit ? flt(computeExpression(acc.credit), 2) : 0
+                        const computedDebit = acc?.debit ? flt(computeExpression(acc.debit), getCurrencyPrecision()) : 0
+                        const computedCredit = acc?.credit ? flt(computeExpression(acc.credit), getCurrencyPrecision()) : 0
 
-                        totalDebits = flt(totalDebits + computedDebit, 2)
-                        totalCredits = flt(totalCredits + computedCredit, 2)
+                        totalDebits = flt(totalDebits + computedDebit, getCurrencyPrecision())
+                        totalCredits = flt(totalCredits + computedCredit, getCurrencyPrecision())
                         accounts.push({
                             account: acc?.account ?? '',
                             debit: computedDebit,
@@ -554,10 +554,10 @@ const Entries = ({ company, isWithdrawal, currency }: { company: string, isWithd
 
     const onAdd = useCallback(() => {
         const existingEntries = getValues('entries')
-        const totalDebits = existingEntries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), 2), 0)
-        const totalCredits = existingEntries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), 2), 0)
+        const totalDebits = existingEntries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), getCurrencyPrecision()), 0)
+        const totalCredits = existingEntries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), getCurrencyPrecision()), 0)
 
-        const remainingAmount = flt(totalDebits - totalCredits, 2)
+        const remainingAmount = flt(totalDebits - totalCredits, getCurrencyPrecision())
 
         // Remaining amount is credit if it's positive - since some debit is pending to be cleared.
         const debitAmount = remainingAmount > 0 ? 0 : Math.abs(remainingAmount)
@@ -607,14 +607,14 @@ const Entries = ({ company, isWithdrawal, currency }: { company: string, isWithd
     const onAddDifferenceClicked = () => {
 
         const existingEntries = getValues('entries')
-        const totalDebits = existingEntries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), 2), 0)
-        const totalCredits = existingEntries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), 2), 0)
+        const totalDebits = existingEntries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), getCurrencyPrecision()), 0)
+        const totalCredits = existingEntries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), getCurrencyPrecision()), 0)
 
         const lastIndex = existingEntries.length - 1
 
         const isLastRowEmpty = (existingEntries[lastIndex]?.debit === 0 || existingEntries[lastIndex]?.debit === undefined) && (existingEntries[lastIndex]?.credit === 0 || existingEntries[lastIndex]?.credit === undefined)
 
-        const remainingAmount = flt(totalDebits - totalCredits, 2)
+        const remainingAmount = flt(totalDebits - totalCredits, getCurrencyPrecision())
 
         // Remaining amount is credit if it's positive - since some debit is pending to be cleared.
         const debitAmount = remainingAmount > 0 ? 0 : Math.abs(remainingAmount)
@@ -829,9 +829,9 @@ const Summary = ({ currency, addRow }: { currency: string, addRow: () => void })
 
     const { total, totalCredits, totalDebits } = useMemo(() => {
         // Do a total debits - total credits
-        const totalDebits = entries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), 2), 0)
-        const totalCredits = entries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), 2), 0)
-        return { total: flt(totalDebits - totalCredits, 2), totalDebits, totalCredits }
+        const totalDebits = entries.reduce((acc, curr) => flt(acc + (curr.debit ?? 0), getCurrencyPrecision()), 0)
+        const totalCredits = entries.reduce((acc, curr) => flt(acc + (curr.credit ?? 0), getCurrencyPrecision()), 0)
+        return { total: flt(totalDebits - totalCredits, getCurrencyPrecision()), totalDebits, totalCredits }
     }, [entries])
 
     const onAddRow = useCallback(() => {

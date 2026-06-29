@@ -17,7 +17,7 @@ import { getCurrencySymbol } from "@/lib/currency"
 import { Virtuoso } from 'react-virtuoso'
 import { formatDate } from "@/lib/date"
 import { Badge } from "@/components/ui/badge"
-import { formatCurrency, getCurrencyFormatInfo } from "@/lib/numbers"
+import { formatCurrency, getCurrencyFormatInfo, getCurrencyPrecision } from "@/lib/numbers"
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { slug } from "@/lib/frappe"
@@ -77,6 +77,7 @@ const UnreconciledTransactions = ({ contentHeight }: { contentHeight: number }) 
     const formatInfo = getCurrencyFormatInfo(currency)
     const groupSeparator = formatInfo.group_sep || ","
     const decimalSeparator = formatInfo.decimal_str || "."
+    const currencyPrecision = getCurrencyPrecision()
 
     const inputRef = useRef<HTMLInputElement>(null)
 
@@ -162,11 +163,11 @@ const UnreconciledTransactions = ({ contentHeight }: { contentHeight: number }) 
                 <CurrencyInput
                     groupSeparator={groupSeparator}
                     decimalSeparator={decimalSeparator}
-                    placeholder={`${currencySymbol}0${decimalSeparator}00`}
-                    decimalsLimit={2}
+                    placeholder={`${currencySymbol}0${decimalSeparator}${"0".repeat(currencyPrecision)}`}
+                    decimalsLimit={currencyPrecision}
                     value={amountFilter.stringValue}
                     maxLength={12}
-                    decimalScale={2}
+                    decimalScale={currencyPrecision}
                     prefix={currencySymbol}
                     onValueChange={(v, _n, values) => {
                         // If the input ends with a decimal or a decimal with trailing zeroes, store the string since we need the user to be able to type the decimals.

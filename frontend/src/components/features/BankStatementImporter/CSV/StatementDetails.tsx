@@ -1,6 +1,6 @@
 import _ from '@/lib/translate'
 import { GetStatementDetailsResponse } from '../import_utils'
-import { flt, formatCurrency } from '@/lib/numbers'
+import { flt, formatCurrency, getCurrencyPrecision } from '@/lib/numbers'
 import { formatDate } from '@/lib/date'
 import { bankRecDateAtom, SelectedBank } from '../../BankReconciliation/bankRecAtoms'
 import { ChevronLeftIcon, ExternalLinkIcon, InfoIcon, Landmark, Loader2Icon } from 'lucide-react'
@@ -163,7 +163,7 @@ const StatementDetails = ({ data, bank, onBack }: Props) => {
                         </TableRow>
                         <TableRow>
                             <TableHead className='bg-muted/70'>{_("Closing Balance as of {}", [formatDate(data.statement_end_date, "Do MMMM YYYY")])}</TableHead>
-                            <TableCell className='font-mono'>{formatCurrency(flt(data.closing_balance, 2))}</TableCell>
+                            <TableCell className='font-mono'>{formatCurrency(flt(data.closing_balance, getCurrencyPrecision()))}</TableCell>
                         </TableRow>
                         <TableRow>
                             <TableHead className='bg-muted/70'>
