@@ -379,6 +379,7 @@ def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | i
         bank_transaction = frappe.db.get_value("Bank Transaction", bank_transaction_name, ["name", "deposit", "withdrawal", "bank_account", "currency", "unallocated_amount", "date", "reference_number", "description"], as_dict=True)
 
         transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
+        company = frappe.get_cached_value("Account", transaction_account, "company")
 
         is_withdrawal = bank_transaction.withdrawal > 0.0
 
@@ -393,7 +394,7 @@ def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | i
             "doctype": "Payment Entry",
             "payment_type": "Pay" if is_withdrawal else "Receive",
             "bank_account": bank_transaction.bank_account,
-            "company": bank_transaction.company,
+            "company": company,
             "mode_of_payment": mode_of_payment,
             "party_type": party_type,
             "party": party,

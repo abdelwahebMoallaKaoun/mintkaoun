@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Bulk payment entry creation no longer fails with `MandatoryError: [Payment Entry]: company`. `create_bulk_payment_entry_and_reconcile` read `company` off a bank transaction row that was never fetched, so every payment entry was built with an empty company. It is now derived from the bank account's GL account, matching the other payment entry and journal entry creation paths.
+
 ## [1.6.0] - 2026-06-29
 
 ### Added
