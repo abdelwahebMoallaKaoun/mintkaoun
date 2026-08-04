@@ -10,3 +10,5 @@ __pycache__
 mint/public/mint
 mint/public/node_modules
 mint/www/mint.html
+
+internal_documents/
