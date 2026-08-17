@@ -1,5 +1,6 @@
 import frappe
 from frappe import _
+from frappe.utils import flt
 import json
 import datetime
 from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import (
@@ -475,6 +476,7 @@ def get_linked_payments(bank_transaction_name, document_types=None, from_date=No
         bank_transaction_name, document_types, from_date, to_date,
         filter_by_reference_date, from_amount, to_amount,
     )
+    payments = [p for p in payments if flt(p.get("paid_amount"), 3) > 0]
 
     name_cache = {}
     for p in payments:
