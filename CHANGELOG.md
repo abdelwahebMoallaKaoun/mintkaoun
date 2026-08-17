@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-08-17
+
+### Fixed
+- Bank reconciliation no longer lists vouchers with a zero paid amount (`0.000`) as available matches.
+
 ## [1.6.1] - 2026-08-05
 
 ### Fixed
@@ -27,7 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Baseline version. Changes prior to the introduction of this changelog are not itemized.
 
-[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.4...v1.6.0
 [1.5.4]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.3...v1.5.4
