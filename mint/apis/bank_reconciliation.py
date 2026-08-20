@@ -3,9 +3,11 @@ from frappe import _
 from frappe.utils import flt
 import json
 import datetime
+from erpnext.accounts.doctype.bank_transaction.bank_transaction import (
+    get_related_bank_gl_entries,
+    get_total_allocated_amount,
+)
 from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import (
-    create_payment_entry_bts,
-    create_journal_entry_bts,
     get_linked_payments as _get_linked_payments,
 )
 from erpnext.accounts.party import get_party_account
@@ -50,6 +52,54 @@ def reconcile_vouchers(bank_transaction_name: str | int, vouchers: str, is_new_v
     transaction.update_allocated_amount()
     transaction.set_status()
     transaction.save()
+
+    payment_entries = [
+        (voucher["payment_doctype"], voucher["payment_name"])
+        for voucher in vouchers
+        if voucher["payment_doctype"] == "Payment Entry"
+    ]
+    if not payment_entries:
+        return transaction
+
+    allocated_amounts = get_total_allocated_amount(payment_entries)
+    bank_gl_entries = get_related_bank_gl_entries(payment_entries)
+    bank_gl_account = frappe.db.get_value("Bank Account", transaction.bank_account, "account")
+    account_field = "paid_to" if transaction.deposit > 0 else "paid_from"
+    amount_field = "received_amount_after_tax" if transaction.deposit > 0 else "paid_amount_after_tax"
+    precision = transaction.precision("unallocated_amount")
+    payments = frappe.get_list(
+        "Payment Entry",
+        filters={"name": ("in", [payment_entry[1] for payment_entry in payment_entries])},
+        fields=["name", "payment_type", account_field, amount_field, "clearance_date"],
+        limit_page_length=0,
+    )
+    payments = {payment.name: payment for payment in payments}
+
+    for payment_entry in payment_entries:
+        payment = payments.get(payment_entry[1])
+        payment_allocations = allocated_amounts.get(payment_entry, {})
+        allocation = payment_allocations.get(bank_gl_account, {})
+        other_bank_accounts_reconciled = all(
+            flt(amount, precision)
+            == flt(payment_allocations.get(account, {}).get("total"), precision)
+            for account, amount in bank_gl_entries.get(payment_entry, {}).items()
+            if account != bank_gl_account
+        )
+        if (
+            payment
+            and payment.payment_type != "Internal Transfer"
+            and not payment.clearance_date
+            and payment.get(account_field) == bank_gl_account
+            and other_bank_accounts_reconciled
+            and flt(allocation.get("total"), precision) > 0
+            and flt(allocation.get("total"), precision) == flt(payment.get(amount_field), precision)
+        ):
+            frappe.db.set_value(
+                "Payment Entry",
+                payment_entry[1],
+                "clearance_date",
+                allocation.get("latest_date") or transaction.date,
+            )
     
     return transaction
 
@@ -550,4 +600,3 @@ def search_for_transfer_transaction(transaction_id: str | int):
         }
 
     return None
-
