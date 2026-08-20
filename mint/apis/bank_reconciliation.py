@@ -8,8 +8,6 @@ from erpnext.accounts.doctype.bank_transaction.bank_transaction import (
     get_total_allocated_amount,
 )
 from erpnext.accounts.doctype.bank_reconciliation_tool.bank_reconciliation_tool import (
-    create_payment_entry_bts,
-    create_journal_entry_bts,
     get_linked_payments as _get_linked_payments,
 )
 from erpnext.accounts.party import get_party_account
