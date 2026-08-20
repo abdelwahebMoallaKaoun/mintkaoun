@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-08-20
+
+### Fixed
+- Bank reconciliation now uses net payment amounts so reconciled transactions update Mint balances correctly.
+
 ## [1.6.2] - 2026-08-17
 
 ### Fixed
@@ -32,7 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Baseline version. Changes prior to the introduction of this changelog are not itemized.
 
-[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.3...HEAD
+[1.6.3]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.5.4...v1.6.0
