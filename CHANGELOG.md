@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-08-21
+
 ### Added
 - Invoice allocation in the bulk **Record Payment** flow (ACC-1546). Selecting several bank transactions now lets each one be expanded and allocated across the party's outstanding invoices, so the payment entries settle invoices instead of landing unallocated on the party's account. Allocation stays optional per transaction — leaving one untouched creates an unallocated payment entry, as before. `create_bulk_payment_entry_and_reconcile` accepts the allocations keyed by bank transaction and rejects, before writing anything, a transaction allocating more than it is worth or an invoice allocated beyond its outstanding amount across the batch.
 
@@ -43,7 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Baseline version. Changes prior to the introduction of this changelog are not itemized.
 
-[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.3...v1.7.0
 [1.6.3]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/abdelwahebMoallaKaoun/mintkaoun/compare/v1.6.0...v1.6.1
