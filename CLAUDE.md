@@ -46,7 +46,7 @@ This updates all version files, moves the `[Unreleased]` changelog entries under
 **Backend (`mint/`)** — Frappe/Python layer:
 - `mint/apis/` — Whitelisted API endpoints called by the frontend. Each file owns a domain: `transactions.py` (fetching bank transactions), `bank_reconciliation.py` (matching logic), `rules.py` (auto-matching rule evaluation), `statement_import.py` (CSV/PDF import pipeline), `google_ai.py` (Document AI PDF parsing), `bank_clearance.py` (clearance reports), `bank_account.py` (account helpers).
 - `mint/mint/doctype/` — Custom Frappe doctypes: `mint_bank_transaction_rule`, `mint_settings`, `mint_bank_statement_import`, and others.
-- `mint/mint/page/bank_reconciliation/` — The Frappe page definition that bootstraps the React app.
+- `mint/mint/page/bank_reconciliation/` — A stub Frappe page (`bank-reconciliation`) that only redirects to `/mint`. It does not render the React app.
 - `mint/overrides/` — Overrides standard ERPNext doctypes (e.g. `bank_account.py`).
 - `mint/hooks.py` — App lifecycle hooks: doc events, scheduler jobs, permissions, fixtures.
 - `mint/www/mint.py` — Serves the React SPA at the `/mint` route.
@@ -72,7 +72,9 @@ All API calls go through Frappe's whitelist mechanism. The frontend uses `frappe
 
 ### Build output
 
-`yarn build` in `frontend/` runs Vite and outputs to `mint/public/mint/`. Frappe serves this at `/assets/mint/mint/`. The HTML entry is also copied to `mint/mint/page/bank_reconciliation/bank_reconciliation.html` so Frappe's page system can render it.
+`yarn build` in `frontend/` runs Vite and outputs to `mint/public/mint/`. Frappe serves this at `/assets/mint/mint/`. The build's `copy-html-entry` step then copies `mint/public/mint/index.html` to `mint/www/mint.html`, which is the page Frappe renders at `/mint` (its Jinja context comes from `mint/www/mint.py`).
+
+Both `mint/public/mint/` and `mint/www/mint.html` are gitignored — they are build artifacts, produced at image build time. A checkout without a build has no servable frontend.
 
 ## Key dependencies
 
