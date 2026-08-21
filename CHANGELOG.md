@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Invoice allocation in the bulk **Record Payment** flow (ACC-1546). Selecting several bank transactions now lets each one be expanded and allocated across the party's outstanding invoices, so the payment entries settle invoices instead of landing unallocated on the party's account. Allocation stays optional per transaction — leaving one untouched creates an unallocated payment entry, as before. `create_bulk_payment_entry_and_reconcile` accepts the allocations keyed by bank transaction and rejects, before writing anything, a transaction allocating more than it is worth or an invoice allocated beyond its outstanding amount across the batch.
+
+### Fixed
+- The **Mode of Payment** picked in the bulk **Record Payment** dialog is no longer silently discarded (ACC-1545). The submit payload never sent the field, so every payment entry created from a multi-transaction selection had an empty mode of payment.
+
 ## [1.6.3] - 2026-08-20
 
 ### Fixed

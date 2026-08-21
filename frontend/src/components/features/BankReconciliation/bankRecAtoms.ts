@@ -57,6 +57,7 @@ export interface ActionLog {
         party?: string,
         account?: string,
         bank_account?: string,
+        mode_of_payment?: string,
     }
 }
 
