@@ -414,20 +414,117 @@ def create_bank_entry_and_reconcile(bank_transaction_name: str | int,
         "journal_entry": bank_entry,
     }
 
+# Child table fields of a Payment Entry Reference that the bulk allocation accepts.
+# Anything else the client sends is dropped, so a stray field can't be written to the
+# payment entry's references.
+ALLOWED_REFERENCE_FIELDS = (
+    "reference_doctype",
+    "reference_name",
+    "due_date",
+    "bill_no",
+    "payment_term",
+    "payment_term_outstanding",
+    "total_amount",
+    "outstanding_amount",
+    "allocated_amount",
+    "account",
+    "exchange_rate",
+)
+
+
+def clean_allocated_references(references: list | None) -> list:
+    """
+        Keep only the allowed fields of each reference row and drop rows that
+        allocate nothing, so an untouched invoice never lands on the payment entry.
+    """
+    cleaned = []
+
+    for reference in (references or []):
+        if flt(reference.get("allocated_amount")) <= 0:
+            continue
+
+        if not (reference.get("reference_doctype") and reference.get("reference_name")):
+            frappe.throw(_("Every allocated invoice needs a reference document and name"))
+
+        row = {field: reference.get(field) for field in ALLOWED_REFERENCE_FIELDS if reference.get(field) is not None}
+        row.setdefault("exchange_rate", 1)
+        cleaned.append(row)
+
+    return cleaned
+
+
+def validate_bulk_allocations(transactions: dict, references_by_transaction: dict):
+    """
+        Validate the allocations of a bulk payment entry submission before anything is written.
+
+        Two things can go wrong: a transaction allocating more than it is worth, and an
+        invoice being allocated beyond its outstanding amount once every transaction in the
+        batch is counted. Payment Entry catches the first per document, but only after the
+        earlier entries of the batch have already been submitted - so both are checked upfront.
+    """
+    allocated_per_invoice = {}
+
+    for name, references in references_by_transaction.items():
+        transaction = transactions.get(str(name))
+
+        if not transaction:
+            frappe.throw(_("Allocations were sent for {0}, which is not part of this reconciliation").format(name))
+
+        total_allocated = sum(flt(reference.get("allocated_amount")) for reference in references)
+
+        if flt(total_allocated - flt(transaction.unallocated_amount), 6) > 0:
+            frappe.throw(_("The transaction dated {0} allocates {1} across its invoices, which is more than the {2} left on it").format(
+                frappe.format(transaction.date, {"fieldtype": "Date"}),
+                total_allocated,
+                transaction.unallocated_amount,
+            ))
+
+        for reference in references:
+            key = (reference.get("reference_doctype"), reference.get("reference_name"))
+            allocated_per_invoice[key] = flt(allocated_per_invoice.get(key, 0)) + flt(reference.get("allocated_amount"))
+
+    for (reference_doctype, reference_name), allocated in allocated_per_invoice.items():
+        outstanding = flt(frappe.db.get_value(reference_doctype, reference_name, "outstanding_amount"))
+
+        if flt(allocated - outstanding, 6) > 0:
+            frappe.throw(_("{0} {1} has {2} outstanding, but the selected transactions allocate {3} to it").format(
+                reference_doctype, reference_name, outstanding, allocated,
+            ))
+
+
 @frappe.whitelist(methods=['POST'])
-def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | int], 
-                                            party_type: str, 
-                                            party: str | int, 
+def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | int],
+                                            party_type: str,
+                                            party: str | int,
                                             account: str,
-                                            mode_of_payment: str | None = None):
+                                            mode_of_payment: str | None = None,
+                                            references: dict | str | None = None):
     """
-        Create a payment entry and reconcile it with the bank transaction
+        Create a payment entry for each bank transaction and reconcile it with that transaction.
+
+        `references` optionally maps a bank transaction name to the invoices its payment entry
+        settles - {"<bank transaction>": [{reference_doctype, reference_name, allocated_amount, ...}]}.
+        A transaction missing from the map gets a fully unallocated payment entry, which is what
+        the whole batch used to get.
     """
+    references_by_transaction = frappe.parse_json(references) if isinstance(references, str) else (references or {})
+
+    transactions = {
+        str(name): frappe.db.get_value("Bank Transaction", name, ["name", "deposit", "withdrawal", "bank_account", "currency", "unallocated_amount", "date", "reference_number", "description"], as_dict=True)
+        for name in bank_transaction_names
+    }
+
+    references_by_transaction = {
+        str(name): clean_allocated_references(rows)
+        for name, rows in references_by_transaction.items()
+    }
+
+    validate_bulk_allocations(transactions, references_by_transaction)
 
     output = []
 
     for bank_transaction_name in bank_transaction_names:
-        bank_transaction = frappe.db.get_value("Bank Transaction", bank_transaction_name, ["name", "deposit", "withdrawal", "bank_account", "currency", "unallocated_amount", "date", "reference_number", "description"], as_dict=True)
+        bank_transaction = transactions[str(bank_transaction_name)]
 
         transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
         company = frappe.get_cached_value("Account", transaction_account, "company")
@@ -460,6 +557,9 @@ def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | i
             "reference_date": bank_transaction.date,
             "posting_date": bank_transaction.date,
             "reference_no": (bank_transaction.reference_number or bank_transaction.description or '')[:140],
+            # The invoices this transaction settles, if any were allocated. Payment Entry derives
+            # total_allocated_amount and unallocated_amount from these on validate.
+            "references": references_by_transaction.get(str(bank_transaction_name), []),
         })
 
         payment_entry_doc.insert()

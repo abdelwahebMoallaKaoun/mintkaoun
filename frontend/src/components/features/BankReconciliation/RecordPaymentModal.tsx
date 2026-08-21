@@ -5,7 +5,7 @@ import _ from "@/lib/translate"
 import { UnreconciledTransaction, useGetRuleForTransaction, useRefreshUnreconciledTransactions, useUpdateActionLog } from "./utils"
 import { useFieldArray, useForm, useFormContext, useWatch } from "react-hook-form"
 import { getCompanyCostCenter, getCompanyCurrency } from "@/lib/company"
-import { FrappeConfig, FrappeContext, useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk"
+import { FrappeConfig, FrappeContext, FrappeError, useFrappeGetCall, useFrappePostCall } from "frappe-react-sdk"
 import { toast } from "sonner"
 import ErrorBanner from "@/components/ui/error-banner"
 import { Button } from "@/components/ui/button"
@@ -15,7 +15,7 @@ import { Form } from "@/components/ui/form"
 import { ChangeEvent, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Checkbox } from "@/components/ui/checkbox"
-import { AlertCircleIcon, Plus, Trash2 } from "lucide-react"
+import { AlertCircleIcon, ArrowDownRight, ArrowUpRight, ChevronDown, ChevronRight, Plus, Trash2 } from "lucide-react"
 import { flt, formatCurrency, getCurrencyPrecision } from "@/lib/numbers"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -29,7 +29,7 @@ import MarkdownRenderer from "@/components/ui/markdown"
 import { Separator } from "@/components/ui/separator"
 import { PaymentEntryDeduction } from "@/types/Accounts/PaymentEntryDeduction"
 import { TableLoader } from "@/components/ui/loaders"
-import SelectedTransactionsTable from "./SelectedTransactionsTable"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { useCurrentCompany } from "@/hooks/useCurrentCompany"
 import { Label } from "@/components/ui/label"
 import { FileDropzone } from "@/components/ui/file-dropzone"
@@ -74,9 +74,157 @@ const RecordPaymentModalContent = () => {
             selectedTransaction={selectedTransaction[0]} />
     }
 
+    // Keyed by the selection so the form - whose allocations are indexed by position - starts
+    // clean rather than carrying rows over if the selection changes behind the modal
     return <BulkPaymentEntryForm
+        key={selectedTransaction.map((transaction) => transaction.name).join(',')}
         transactions={selectedTransaction} />
 
+}
+
+/** A row of the invoice allocation of one transaction - mirrors a Payment Entry Reference */
+interface BulkAllocationReference {
+    reference_doctype: string
+    reference_name: string
+    bill_no?: string
+    due_date?: string
+    total_amount?: number
+    outstanding_amount?: number
+    payment_term?: string
+    payment_term_outstanding?: string
+    account?: string
+    allocated_amount: number
+}
+
+interface BulkPaymentFormValues {
+    party_type: PaymentEntry['party_type'],
+    party: PaymentEntry['party'],
+    party_name: PaymentEntry['party_name'],
+    /** GL account that's paid from or paid to */
+    account: string
+    mode_of_payment: PaymentEntry['mode_of_payment']
+    /**
+     * The invoices each selected transaction settles - one entry per transaction, in the same
+     * order as the selection.
+     *
+     * Allocation is per transaction rather than for the batch as a whole because each transaction
+     * gets its own payment entry, and a payment entry's references have to add up to its own
+     * paid amount.
+     */
+    allocations: { references: BulkAllocationReference[] }[]
+}
+
+/** Identifies an invoice so its allocations can be totalled across the whole batch */
+const invoiceKey = (reference: { reference_doctype: string, reference_name: string }) => `${reference.reference_doctype}:${reference.reference_name}`
+
+const emptyAllocations = (count: number) => Array.from({ length: count }, () => ({ references: [] as BulkAllocationReference[] }))
+
+const toAllocationReference = (invoice: OutstandingInvoice, allocated_amount: number): BulkAllocationReference => ({
+    reference_doctype: invoice.voucher_type,
+    reference_name: invoice.voucher_no,
+    bill_no: invoice.bill_no,
+    due_date: invoice.due_date,
+    total_amount: invoice.invoice_amount,
+    outstanding_amount: invoice.outstanding_amount,
+    payment_term: invoice.payment_term,
+    payment_term_outstanding: invoice.payment_term_outstanding,
+    account: invoice.account,
+    allocated_amount
+})
+
+const totalAllocated = (references?: BulkAllocationReference[]) => (references ?? []).reduce((total, reference) => total + flt(reference.allocated_amount), 0)
+
+/** How much of each invoice the whole batch has taken, keyed by {@link invoiceKey} */
+const getAllocatedPerInvoice = (allocations?: BulkPaymentFormValues['allocations']) => {
+    const totals: Record<string, number> = {}
+
+    for (const allocation of allocations ?? []) {
+        for (const reference of allocation?.references ?? []) {
+            const key = invoiceKey(reference)
+            totals[key] = flt(totals[key]) + flt(reference.allocated_amount)
+        }
+    }
+
+    return totals
+}
+
+/**
+ * The party's outstanding invoices, fetched once for the whole batch - every transaction of a bulk
+ * payment goes to the same party, so they all pick from the same list.
+ */
+const useOutstandingInvoicesForParty = ({ company, partyType, party, account, postingDate }: {
+    company: string,
+    partyType?: string,
+    party?: string,
+    account?: string,
+    postingDate?: string
+}) => {
+
+    const isReady = Boolean(company && partyType && party && account)
+
+    const { data, isLoading, error } = useFrappeGetCall<{ message: OutstandingInvoice[] }>('erpnext.accounts.doctype.payment_entry.payment_entry.get_outstanding_reference_documents', {
+        args: {
+            company: company,
+            posting_date: postingDate,
+            party_type: partyType,
+            party: party,
+            party_account: account,
+            get_outstanding_invoices: true,
+            // Amounts are allocated per transaction below, so the server shouldn't pre-fill them
+            allocate_payment_amount: 0
+        }
+    }, isReady ? `mint-bulk-outstanding-invoices-${company}-${partyType}-${party}-${account}-${postingDate}` : null, {
+        revalidateOnFocus: false
+    })
+
+    return { invoices: data?.message ?? [], isLoading: isReady && isLoading, error, isReady }
+}
+
+/**
+ * Everything that would make the batch invalid, as messages to show the user.
+ *
+ * The same two rules are enforced in `create_bulk_payment_entry_and_reconcile` - a payment entry
+ * can't allocate more than its transaction is worth, and an invoice can't be allocated beyond its
+ * outstanding amount once every transaction of the batch is counted.
+ */
+const getAllocationErrors = ({ transactions, allocations, invoices, currency }: {
+    transactions: UnreconciledTransaction[],
+    allocations?: BulkPaymentFormValues['allocations'],
+    invoices: OutstandingInvoice[],
+    currency: string
+}) => {
+
+    const precision = getCurrencyPrecision()
+    const errors: string[] = []
+
+    transactions.forEach((transaction, index) => {
+        const allocated = totalAllocated(allocations?.[index]?.references)
+
+        if (flt(allocated - flt(transaction.unallocated_amount), precision) > 0) {
+            errors.push(_("The transaction of {0} on {1} has {2} allocated to invoices.", [
+                formatCurrency(transaction.unallocated_amount, currency) ?? '',
+                formatDate(transaction.date),
+                formatCurrency(allocated, currency) ?? ''
+            ]))
+        }
+    })
+
+    const allocatedPerInvoice = getAllocatedPerInvoice(allocations)
+
+    invoices.forEach((invoice) => {
+        const allocated = flt(allocatedPerInvoice[invoiceKey({ reference_doctype: invoice.voucher_type, reference_name: invoice.voucher_no })])
+
+        if (flt(allocated - flt(invoice.outstanding_amount), precision) > 0) {
+            errors.push(_("{0} {1} has {2} outstanding, but {3} allocated to it.", [
+                invoice.voucher_type,
+                invoice.voucher_no,
+                formatCurrency(invoice.outstanding_amount, currency) ?? '',
+                formatCurrency(allocated, currency) ?? ''
+            ]))
+        }
+    })
+
+    return errors
 }
 
 const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTransaction[] }) => {
@@ -84,14 +232,11 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
 
     const setIsOpen = useSetAtom(bankRecRecordPaymentModalAtom)
 
-    const form = useForm<{
-        party_type: PaymentEntry['party_type'],
-        party: PaymentEntry['party'],
-        party_name: PaymentEntry['party_name'],
-        /** GL account that's paid from or paid to */
-        account: string
-        mode_of_payment: PaymentEntry['mode_of_payment']
-    }>()
+    const form = useForm<BulkPaymentFormValues>({
+        defaultValues: {
+            allocations: emptyAllocations(transactions.length)
+        }
+    })
 
     const { call: createPaymentEntry, loading, error } = useFrappePostCall<{ message: { transaction: BankTransaction, payment_entry: PaymentEntry }[] }>('mint.apis.bank_reconciliation.create_bulk_payment_entry_and_reconcile')
 
@@ -99,13 +244,19 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
 
     const addToActionLog = useUpdateActionLog()
 
-    const onSubmit = (data: { party_type: PaymentEntry['party_type'], party: PaymentEntry['party'], account: string, mode_of_payment: PaymentEntry['mode_of_payment'] }) => {
+    const onSubmit = (data: BulkPaymentFormValues) => {
 
         createPaymentEntry({
             bank_transaction_names: transactions.map((transaction) => transaction.name),
             party_type: data.party_type,
             party: data.party,
-            account: data.account
+            account: data.account,
+            mode_of_payment: data.mode_of_payment,
+            // Keyed by bank transaction so each payment entry only gets the invoices allocated to it
+            references: Object.fromEntries(transactions.map((transaction, index) => [
+                transaction.name,
+                data.allocations?.[index]?.references ?? []
+            ]))
         }).then(({ message }) => {
 
             addToActionLog({
@@ -129,6 +280,7 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
                     party_type: data.party_type,
                     party: data.party,
                     account: data.account,
+                    mode_of_payment: data.mode_of_payment,
                 }
             })
 
@@ -147,13 +299,40 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
 
     const party = useWatch({ control: form.control, name: 'party' })
 
+    const account = useWatch({ control: form.control, name: 'account' })
+
+    const allocations = useWatch({ control: form.control, name: 'allocations' })
+
     const { call } = useContext(FrappeContext) as FrappeConfig
 
     const currentCompany = useCurrentCompany()
 
     const company = transactions && transactions.length > 0 ? transactions[0].company : (currentCompany ?? '')
 
+    const currency = transactions[0]?.currency ?? getCompanyCurrency(company ?? '')
+
+    // Outstanding is read as of the last transaction of the batch, so every transaction sees the
+    // same invoices - a transaction can still only allocate what it is worth.
+    const postingDate = useMemo(() => transactions.map((transaction) => transaction.date).filter(Boolean).sort().at(-1), [transactions])
+
+    const { invoices, isLoading: invoicesLoading, error: invoicesError, isReady } = useOutstandingInvoicesForParty({
+        company: company ?? '',
+        partyType: party_type,
+        party: party,
+        account: account,
+        postingDate: postingDate
+    })
+
+    const allocationErrors = useMemo(() => getAllocationErrors({ transactions, allocations, invoices, currency }), [transactions, allocations, invoices, currency])
+
+    /** The allocations belong to the previous party, so they can't carry over to the new one */
+    const resetAllocations = useCallback(() => {
+        form.setValue('allocations', emptyAllocations(transactions.length))
+    }, [form, transactions.length])
+
     const onPartyChange = (event: ChangeEvent<HTMLInputElement>) => {
+        resetAllocations()
+
         // Fetch the party and account
         if (event.target.value) {
             call.get('mint.apis.bank_reconciliation.get_party_details', {
@@ -178,8 +357,6 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
 
                 {error && <ErrorBanner error={error} />}
 
-                <SelectedTransactionsTable />
-
                 <div className='grid grid-cols-8 gap-4'>
                     <div className="col-span-1">
                         <PartyTypeFormField
@@ -192,6 +369,7 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
                                 },
                             }}
                             rules={{
+                                onChange: resetAllocations,
                                 required: "Party Type is required"
                             }}
                         />
@@ -231,6 +409,7 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
                             label={_("Account")}
                             isRequired
                             rules={{
+                                onChange: resetAllocations,
                                 required: _('Account is required')
                             }}
                             account_type={['Payable', 'Receivable']}
@@ -255,17 +434,323 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
 
                 </div>
 
+                <Separator />
+
+                <BulkInvoiceAllocation
+                    transactions={transactions}
+                    currency={currency}
+                    invoices={invoices}
+                    isLoading={invoicesLoading}
+                    error={invoicesError}
+                    canAllocate={isReady}
+                />
+
+                {allocationErrors.length > 0 && <Alert variant='destructive'>
+                    <AlertCircleIcon />
+                    <AlertTitle>{_("The allocated invoices don't add up")}</AlertTitle>
+                    <AlertDescription>
+                        <ul className="list-disc pl-4">
+                            {allocationErrors.map((message) => <li key={message}>{message}</li>)}
+                        </ul>
+                    </AlertDescription>
+                </Alert>}
 
                 <DialogFooter>
                     <DialogClose asChild>
                         <Button variant={'outline'} disabled={loading}>{_("Cancel")}</Button>
                     </DialogClose>
-                    <Button type='submit' disabled={loading}>{_("Submit")}</Button>
+                    <Button type='submit' disabled={loading || allocationErrors.length > 0}>{_("Submit")}</Button>
                 </DialogFooter>
             </div>
         </form>
     </Form>
 
+}
+
+/**
+ * The selected transactions, each of which can be opened to allocate its amount across the
+ * party's outstanding invoices.
+ *
+ * Leaving a transaction unallocated is fine - its payment entry is then created unallocated,
+ * which is what the whole batch used to do.
+ */
+const BulkInvoiceAllocation = ({ transactions, currency, invoices, isLoading, error, canAllocate }: {
+    transactions: UnreconciledTransaction[],
+    currency: string,
+    invoices: OutstandingInvoice[],
+    isLoading: boolean,
+    error?: FrappeError | null,
+    canAllocate: boolean
+}) => {
+
+    const { control } = useFormContext<BulkPaymentFormValues>()
+
+    const allocations = useWatch({ control, name: 'allocations' })
+
+    const [expandedRow, setExpandedRow] = useState<number | null>(null)
+
+    const allocatedPerInvoice = useMemo(() => getAllocatedPerInvoice(allocations), [allocations])
+
+    const onToggleRow = useCallback((index: number) => {
+        setExpandedRow((current) => current === index ? null : index)
+    }, [])
+
+    return <div className="flex flex-col gap-2">
+        <div className="flex gap-4 items-center">
+            <H4 className="text-base">{_("Transactions & Invoices")}</H4>
+            {!canAllocate && <span className="text-sm text-muted-foreground">{_("Pick a party and an account to allocate invoices")}</span>}
+            {isLoading && <span className="text-sm text-muted-foreground">{_("Loading unpaid invoices...")}</span>}
+            {canAllocate && !isLoading && invoices.length === 0 && <span className="text-sm text-muted-foreground">{_("This party has no unpaid invoices")}</span>}
+        </div>
+
+        {error && <ErrorBanner error={error} />}
+
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead className="w-10"></TableHead>
+                    <TableHead>{_("Date")}</TableHead>
+                    <TableHead>{_("Description")}</TableHead>
+                    <TableHead className="text-right">{_("Amount")}</TableHead>
+                    <TableHead className="text-right">{_("Allocated")}</TableHead>
+                    <TableHead className="text-right">{_("Unallocated")}</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {transactions.map((transaction, index) => (
+                    <TransactionAllocationRow
+                        key={transaction.name}
+                        transaction={transaction}
+                        index={index}
+                        currency={currency}
+                        invoices={invoices}
+                        allocatedPerInvoice={allocatedPerInvoice}
+                        isExpanded={expandedRow === index}
+                        onToggle={onToggleRow}
+                        canAllocate={canAllocate && invoices.length > 0}
+                    />
+                ))}
+            </TableBody>
+        </Table>
+    </div>
+}
+
+const TransactionAllocationRow = ({ transaction, index, currency, invoices, allocatedPerInvoice, isExpanded, onToggle, canAllocate }: {
+    transaction: UnreconciledTransaction,
+    index: number,
+    currency: string,
+    invoices: OutstandingInvoice[],
+    allocatedPerInvoice: Record<string, number>,
+    isExpanded: boolean,
+    onToggle: (index: number) => void,
+    canAllocate: boolean
+}) => {
+
+    const precision = getCurrencyPrecision()
+
+    const { control } = useFormContext<BulkPaymentFormValues>()
+
+    const { fields, append, remove, update } = useFieldArray({
+        control,
+        name: `allocations.${index}.references`
+    })
+
+    const references = useWatch({ control, name: `allocations.${index}.references` })
+
+    const allocated = totalAllocated(references)
+
+    const unallocated = flt(flt(transaction.unallocated_amount) - allocated, precision)
+
+    /** What's left of an invoice once the other transactions of the batch have taken their share */
+    const availableOnInvoice = useCallback((invoice: OutstandingInvoice) => {
+        const key = invoiceKey({ reference_doctype: invoice.voucher_type, reference_name: invoice.voucher_no })
+        const allocatedHere = flt((references ?? []).find((reference) => invoiceKey(reference) === key)?.allocated_amount)
+
+        return flt(flt(invoice.outstanding_amount) - (flt(allocatedPerInvoice[key]) - allocatedHere), precision)
+    }, [references, allocatedPerInvoice, precision])
+
+    const rowIndexOf = useCallback((invoice: OutstandingInvoice) => {
+        const key = invoiceKey({ reference_doctype: invoice.voucher_type, reference_name: invoice.voucher_no })
+
+        return fields.findIndex((field) => invoiceKey(field) === key)
+    }, [fields])
+
+    const onToggleInvoice = useCallback((invoice: OutstandingInvoice) => {
+        const rowIndex = rowIndexOf(invoice)
+
+        if (rowIndex >= 0) {
+            remove(rowIndex)
+            return
+        }
+
+        // Take as much of the invoice as this transaction can still pay for
+        const amount = Math.min(availableOnInvoice(invoice), Math.max(unallocated, 0))
+
+        append(toAllocationReference(invoice, flt(amount, precision)))
+    }, [rowIndexOf, remove, append, availableOnInvoice, unallocated, precision])
+
+    /** Fill the transaction up from the invoices that still have room, earliest due date first */
+    const onAllocateRemaining = useCallback(() => {
+        let remaining = unallocated
+
+        const rows: BulkAllocationReference[] = []
+
+        const sortedInvoices = [...invoices].sort((a, b) => (a.due_date ?? '').localeCompare(b.due_date ?? ''))
+
+        for (const invoice of sortedInvoices) {
+            if (flt(remaining, precision) <= 0) {
+                break
+            }
+
+            if (rowIndexOf(invoice) >= 0) {
+                continue
+            }
+
+            const available = availableOnInvoice(invoice)
+
+            if (flt(available, precision) <= 0) {
+                continue
+            }
+
+            const amount = flt(Math.min(available, remaining), precision)
+
+            rows.push(toAllocationReference(invoice, amount))
+            remaining = flt(remaining - amount, precision)
+        }
+
+        if (rows.length > 0) {
+            append(rows)
+        }
+    }, [unallocated, invoices, precision, rowIndexOf, availableOnInvoice, append])
+
+    const onPayInFull = useCallback((invoice: OutstandingInvoice) => {
+        const rowIndex = rowIndexOf(invoice)
+
+        if (rowIndex < 0) {
+            return
+        }
+
+        const allocatedHere = flt(fields[rowIndex]?.allocated_amount)
+        const amount = flt(Math.min(availableOnInvoice(invoice), allocatedHere + Math.max(unallocated, 0)), precision)
+
+        update(rowIndex, toAllocationReference(invoice, amount))
+    }, [rowIndexOf, fields, availableOnInvoice, unallocated, precision, update])
+
+    const isWithdrawal = transaction.withdrawal && transaction.withdrawal > 0
+
+    return <>
+        <TableRow className={cn(unallocated < 0 && "bg-destructive/5")}>
+            <TableCell>
+                <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    disabled={!canAllocate}
+                    aria-label={_("Allocate invoices to the transaction of {0}", [formatDate(transaction.date)])}
+                    aria-expanded={isExpanded}
+                    onClick={() => onToggle(index)}>
+                    {isExpanded ? <ChevronDown /> : <ChevronRight />}
+                </Button>
+            </TableCell>
+            <TableCell>{formatDate(transaction.date)}</TableCell>
+            <TableCell className="max-w-96 text-ellipsis overflow-hidden" title={transaction.description}>{transaction.description}</TableCell>
+            <TableCell className="text-right">
+                <div className="flex items-center justify-end gap-1">
+                    {isWithdrawal ? <ArrowUpRight className="w-4 h-4 text-destructive" /> : <ArrowDownRight className="w-4 h-4 text-green-600" />}
+                    <span className="font-mono font-medium">
+                        {formatCurrency(transaction.unallocated_amount, currency)}
+                    </span>
+                </div>
+            </TableCell>
+            <TableCell className="text-right font-mono">{formatCurrency(allocated, currency)}</TableCell>
+            <TableCell className={cn("text-right font-mono", unallocated < 0 && "text-destructive")}>{formatCurrency(unallocated, currency)}</TableCell>
+        </TableRow>
+
+        {isExpanded && <TableRow>
+            <TableCell colSpan={6} className="bg-muted/40">
+                <div className="flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium">{_("Invoices settled by this transaction")}</span>
+                        <Button
+                            type='button'
+                            size='sm'
+                            variant='outline'
+                            disabled={flt(unallocated, precision) <= 0}
+                            onClick={onAllocateRemaining}>
+                            <Plus /> {_("Allocate {0}", [formatCurrency(Math.max(unallocated, 0), currency) ?? ''])}
+                        </Button>
+                    </div>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead className="w-10"></TableHead>
+                                <TableHead>{_("Reference Document")}</TableHead>
+                                <TableHead>{_("Invoice No")}</TableHead>
+                                <TableHead>{_("Due Date")}</TableHead>
+                                <TableHead className="text-right">{_("Grand Total")}</TableHead>
+                                <TableHead className="text-right">{_("Available")}</TableHead>
+                                <TableHead className="text-right w-40">{_("Allocated")}</TableHead>
+                                <TableHead className="w-14"></TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {invoices.map((invoice) => {
+                                const rowIndex = rowIndexOf(invoice)
+                                const available = availableOnInvoice(invoice)
+
+                                return <TableRow key={`${invoice.voucher_type}-${invoice.voucher_no}`}>
+                                    <TableCell>
+                                        <Checkbox
+                                            checked={rowIndex >= 0}
+                                            disabled={rowIndex < 0 && flt(available, precision) <= 0}
+                                            aria-label={_("Allocate {0} to this transaction", [invoice.voucher_no])}
+                                            onCheckedChange={() => onToggleInvoice(invoice)} />
+                                    </TableCell>
+                                    <TableCell>
+                                        <a
+                                            target="_blank"
+                                            className="underline underline-offset-2"
+                                            href={`/app/${slug(invoice.voucher_type)}/${invoice.voucher_no}`}>{invoice.voucher_type}: {invoice.voucher_no}</a>
+                                    </TableCell>
+                                    <TableCell>{invoice.bill_no ?? "-"}</TableCell>
+                                    <TableCell>{formatDate(invoice.due_date)}</TableCell>
+                                    <TableCell className="text-right font-mono">{formatCurrency(invoice.invoice_amount, currency)}</TableCell>
+                                    <TableCell className="text-right font-mono">{formatCurrency(available, currency)}</TableCell>
+                                    <TableCell className="text-right max-w-40">
+                                        {rowIndex >= 0 ? <CurrencyFormField
+                                            name={`allocations.${index}.references.${rowIndex}.allocated_amount`}
+                                            label={_("Allocated")}
+                                            hideLabel
+                                            currency={currency}
+                                        /> : <span className="text-muted-foreground font-mono">-</span>}
+                                    </TableCell>
+                                    <TableCell>
+                                        {rowIndex >= 0 && flt(available - flt(references?.[rowIndex]?.allocated_amount), precision) !== 0 ? <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button
+                                                    type='button'
+                                                    variant='ghost'
+                                                    size='icon'
+                                                    className="text-muted-foreground"
+                                                    onClick={() => onPayInFull(invoice)}>
+                                                    <AlertCircleIcon />
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent>
+                                                {_("The invoice is not fully allocated.")}
+                                                <br />
+                                                {_("Click to allocate as much as this transaction can cover.")}
+                                            </TooltipContent>
+                                        </Tooltip> : null}
+                                    </TableCell>
+                                </TableRow>
+                            })}
+                        </TableBody>
+                    </Table>
+                </div>
+            </TableCell>
+        </TableRow>}
+    </>
 }
 
 const PaymentEntryForm = ({ selectedTransaction, selectedBankAccount }: { selectedTransaction: UnreconciledTransaction, selectedBankAccount: SelectedBank }) => {
