@@ -24,7 +24,7 @@ import { H4 } from "@/components/ui/typography"
 import { usePaymentEntryCalculations } from "@/hooks/usePaymentEntryCalculations"
 import { MissingFiltersBanner } from "./MissingFiltersBanner"
 import { formatDate } from "@/lib/date"
-import { slug } from "@/lib/frappe"
+import { getErrorMessage, slug } from "@/lib/frappe"
 import MarkdownRenderer from "@/components/ui/markdown"
 import { Separator } from "@/components/ui/separator"
 import { PaymentEntryDeduction } from "@/types/Accounts/PaymentEntryDeduction"
@@ -297,11 +297,23 @@ const BulkPaymentEntryForm = ({ transactions }: { transactions: UnreconciledTran
             showBulkActionErrorToast(errors)
 
             onReconcile(transactions[transactions.length - 1])
-            setIsOpen(false)
-        }).catch(() => {
-            // The whole request failed - ErrorBanner shows why, and the modal stays open so the
-            // user can retry. Refresh the list anyway: transactions committed before the failure
-            // may already be reconciled.
+
+            // Nothing succeeded - keep the dialog open so the form and the per-transaction
+            // invoice allocations survive a retry instead of being discarded behind a toast.
+            if (results.length > 0) {
+                setIsOpen(false)
+            }
+        }).catch((error) => {
+            // This catches a rejected request AND anything thrown by the handler above. The SDK
+            // only populates `error` for the former, so a bug in the handler would leave the
+            // ErrorBanner empty - report it here rather than failing silently.
+            console.error(error)
+            toast.error(_("Error"), {
+                duration: 5000,
+                description: getErrorMessage(error)
+            })
+            // The dialog stays open so the user can retry with the form intact. Refresh the list
+            // anyway: transactions committed before the failure may already be reconciled.
             onReconcile(transactions[transactions.length - 1])
         })
     }

@@ -1,6 +1,6 @@
 import frappe
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, strip_html_tags
 import json
 import datetime
 from erpnext.accounts.doctype.bank_transaction.bank_transaction import (
@@ -157,24 +157,53 @@ def run_bulk_item(bank_transaction_name: str | int, action, results: list, error
         series row in `tabSeries`, and InnoDB holds it until the transaction commits. Without
         an explicit commit per item, the first insert of a bulk run keeps that lock for the
         whole request and every concurrent insert of the same doctype elsewhere on the site
-        waits 50s and dies with "Lock wait timeout exceeded".
+        waits 50s and dies with "Lock wait timeout exceeded". Committing per item narrows that
+        hold to one item - it does not remove it, because the commit only comes after the voucher
+        has been inserted, submitted and reconciled.
 
         Committing after each item also means a failing item no longer discards the whole
         batch: the rollback only goes back to the previous item's commit.
     """
+    # `frappe.throw` appends to the message log before raising. Swallowing the exception would
+    # otherwise leave those messages to be serialised into `_server_messages` on a 200 response,
+    # so the depth is recorded here and anything the failed item added is dropped below.
+    # getattr: this function's contract is that it never lets the loop die, so even the
+    # bookkeeping before the try avoids assuming the request-local is initialised.
+    message_log_depth = len(getattr(frappe.local, "message_log", []))
+
     try:
         result = action()
     except Exception as e:
-        # Rolls back to the previous item's commit, so items already done survive.
-        frappe.db.rollback()
+        error = str(e) or e.__class__.__name__
+
+        try:
+            del frappe.local.message_log[message_log_depth:]
+            # Rolls back to the previous item's commit, so items already done survive.
+            frappe.db.rollback()
+            frappe.log_error(
+                title=f"Mint bulk reconciliation failed: {bank_transaction_name}"[:140],
+                message=frappe.get_traceback(),
+            )
+            # The Error Log row lands in the transaction the rollback just re-opened. Without this
+            # commit the next failing item's rollback would wipe it, so a run where several items
+            # fail in a row would keep only the last traceback.
+            frappe.db.commit()
+        except Exception:
+            # A dead connection makes the recovery itself raise. The loop has to survive that:
+            # otherwise the caller gets a bare 500 and cannot tell which items already committed.
+            # The database is unusable at this point, so this goes to the file log.
+            frappe.logger().error(
+                f"Mint bulk reconciliation could not record the failure of {bank_transaction_name}",
+                exc_info=True,
+            )
+
+        # Appended outside the recovery block so a failed rollback still reports the item.
         errors.append({
             "bank_transaction": str(bank_transaction_name),
-            "error": str(e) or e.__class__.__name__,
+            # ERPNext throws can carry markup (frappe.bold, get_link_to_form) and the toast
+            # renders this as text, so the tags would otherwise show up literally.
+            "error": strip_html_tags(error),
         })
-        frappe.log_error(
-            title=f"Mint bulk reconciliation failed: {bank_transaction_name}"[:140],
-            message=frappe.get_traceback(),
-        )
     else:
         # The item is complete (voucher created, submitted and reconciled) - release the locks.
         frappe.db.commit()

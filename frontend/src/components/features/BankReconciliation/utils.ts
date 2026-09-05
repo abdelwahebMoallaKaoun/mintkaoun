@@ -113,8 +113,8 @@ export const showBulkActionErrorToast = (errors: BulkActionError[]) => {
     toast.error(_("{0} of the selected transactions could not be processed", [errors.length.toString()]), {
         duration: 8000,
         closeButton: true,
-        // One line per failed transaction - the toast body is a plain text node, so it needs
-        // pre-line to honour the newlines.
+        // One line per failed transaction. Sonner renders the description in its own element,
+        // but sets no white-space of its own, so pre-line on the toast container is inherited.
         style: { whiteSpace: 'pre-line' },
         description: errors.map((e) => `${e.bank_transaction}: ${e.error}`).join('\n'),
     })
