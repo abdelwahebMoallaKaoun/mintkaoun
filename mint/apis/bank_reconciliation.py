@@ -149,41 +149,78 @@ def undo_reconciliation_action(bank_transaction_id: str | int, voucher_type: str
     }
 
 
+def run_bulk_item(bank_transaction_name: str | int, action, results: list, errors: list):
+    """
+        Run one item of a bulk action as its own database transaction.
+
+        Every Payment Entry / Journal Entry insert takes a `FOR UPDATE` lock on the naming
+        series row in `tabSeries`, and InnoDB holds it until the transaction commits. Without
+        an explicit commit per item, the first insert of a bulk run keeps that lock for the
+        whole request and every concurrent insert of the same doctype elsewhere on the site
+        waits 50s and dies with "Lock wait timeout exceeded".
+
+        Committing after each item also means a failing item no longer discards the whole
+        batch: the rollback only goes back to the previous item's commit.
+    """
+    try:
+        result = action()
+    except Exception as e:
+        # Rolls back to the previous item's commit, so items already done survive.
+        frappe.db.rollback()
+        errors.append({
+            "bank_transaction": str(bank_transaction_name),
+            "error": str(e) or e.__class__.__name__,
+        })
+        frappe.log_error(
+            title=f"Mint bulk reconciliation failed: {bank_transaction_name}"[:140],
+            message=frappe.get_traceback(),
+        )
+    else:
+        # The item is complete (voucher created, submitted and reconciled) - release the locks.
+        frappe.db.commit()
+        results.append(result)
+
+
 @frappe.whitelist(methods=["POST"])
 def create_bulk_internal_transfer(bank_transaction_names: list[str|int], 
                                   bank_account: str):
     """
         Create an internal transfer for multiple bank transactions
     """
-    output = []
+    results = []
+    errors = []
 
     for bank_transaction_name in bank_transaction_names:
 
-        bank_transaction = frappe.db.get_value("Bank Transaction", bank_transaction_name, ["name", "withdrawal", "bank_account", "date", "reference_number", "description"], as_dict=True)
+        def action(bank_transaction_name=bank_transaction_name):
+            bank_transaction = frappe.db.get_value("Bank Transaction", bank_transaction_name, ["name", "withdrawal", "bank_account", "date", "reference_number", "description"], as_dict=True)
 
-        transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
+            transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
 
-        is_withdrawal = bank_transaction.withdrawal > 0.0
+            is_withdrawal = bank_transaction.withdrawal > 0.0
 
-        if is_withdrawal:
-            paid_from = transaction_account
-            paid_to = bank_account
-        else:
-            paid_from = bank_account
-            paid_to = transaction_account
-        
-        reference_no = (bank_transaction.reference_number or bank_transaction.description or '')[:140]
-        
-        final_transaction = create_internal_transfer(bank_transaction_name=bank_transaction.name,
-                                 posting_date=bank_transaction.date,
-                                 reference_date=bank_transaction.date,
-                                 reference_no=reference_no,
-                                 paid_from=paid_from,
-                                 paid_to=paid_to,)
-        
-        output.append(final_transaction)
-    
-    return output
+            if is_withdrawal:
+                paid_from = transaction_account
+                paid_to = bank_account
+            else:
+                paid_from = bank_account
+                paid_to = transaction_account
+
+            reference_no = (bank_transaction.reference_number or bank_transaction.description or '')[:140]
+
+            return create_internal_transfer(bank_transaction_name=bank_transaction.name,
+                                     posting_date=bank_transaction.date,
+                                     reference_date=bank_transaction.date,
+                                     reference_no=reference_no,
+                                     paid_from=paid_from,
+                                     paid_to=paid_to,)
+
+        run_bulk_item(bank_transaction_name, action, results, errors)
+
+    return {
+        "results": results,
+        "errors": errors,
+    }
 
 @frappe.whitelist()
 def create_internal_transfer(bank_transaction_name: str|int, 
@@ -267,68 +304,74 @@ def create_bulk_bank_entry_and_reconcile(bank_transactions: list[str|int],
      Create bank entries for all transactions and reconcile them
     """
 
-    output = []
+    results = []
+    errors = []
 
     for bank_transaction in bank_transactions:
-        transactions_details = frappe.db.get_value("Bank Transaction", bank_transaction, ["name", "deposit", "withdrawal", "bank_account", "currency", "unallocated_amount", "date", "reference_number", "description"], as_dict=True)
 
-        is_credit_card = frappe.get_cached_value("Bank Account", transactions_details.bank_account, "is_credit_card")
+        def action(bank_transaction=bank_transaction):
+            transactions_details = frappe.db.get_value("Bank Transaction", bank_transaction, ["name", "deposit", "withdrawal", "bank_account", "currency", "unallocated_amount", "date", "reference_number", "description"], as_dict=True)
 
-        # Check Number will be limited to 140 characters
-        cheque_no = (transactions_details.reference_number or transactions_details.description or '')[:140]
+            is_credit_card = frappe.get_cached_value("Bank Account", transactions_details.bank_account, "is_credit_card")
 
-        is_withdrawal = transactions_details.withdrawal > 0.0
+            # Check Number will be limited to 140 characters
+            cheque_no = (transactions_details.reference_number or transactions_details.description or '')[:140]
 
-        entries = []
+            is_withdrawal = transactions_details.withdrawal > 0.0
 
-        gl_account = frappe.get_cached_value("Bank Account", transactions_details.bank_account, "account")
+            entries = []
 
-        if is_withdrawal:
-            entries.append({
-                "account": gl_account,
-                "bank_account": transactions_details.bank_account,
-                "credit_in_account_currency": transactions_details.unallocated_amount,
-                "credit": transactions_details.unallocated_amount,
-                "debit_in_account_currency": 0,
-                "debit": 0,
-            })
+            gl_account = frappe.get_cached_value("Bank Account", transactions_details.bank_account, "account")
 
-            entries.append({
-                "account": account,
-                "party_type": party_type if party else None,
-                "party": party,
-                "credit": 0,
-                "debit": transactions_details.unallocated_amount,
-            })
-        else:
-            entries.append({
-                "account": gl_account,
-                "bank_account": transactions_details.bank_account,
-                "debit_in_account_currency": transactions_details.unallocated_amount,
-                "debit": transactions_details.unallocated_amount,
-                "credit_in_account_currency": 0,
-                "credit": 0,
-            })
+            if is_withdrawal:
+                entries.append({
+                    "account": gl_account,
+                    "bank_account": transactions_details.bank_account,
+                    "credit_in_account_currency": transactions_details.unallocated_amount,
+                    "credit": transactions_details.unallocated_amount,
+                    "debit_in_account_currency": 0,
+                    "debit": 0,
+                })
 
-            entries.append({
-                "account": account,
-                "party_type": party_type if party else None,
-                "party": party,
-                "debit": 0,
-                "credit": transactions_details.unallocated_amount,
-            })
+                entries.append({
+                    "account": account,
+                    "party_type": party_type if party else None,
+                    "party": party,
+                    "credit": 0,
+                    "debit": transactions_details.unallocated_amount,
+                })
+            else:
+                entries.append({
+                    "account": gl_account,
+                    "bank_account": transactions_details.bank_account,
+                    "debit_in_account_currency": transactions_details.unallocated_amount,
+                    "debit": transactions_details.unallocated_amount,
+                    "credit_in_account_currency": 0,
+                    "credit": 0,
+                })
 
-        final_transaction = create_bank_entry_and_reconcile(bank_transaction_name=bank_transaction,
-                                        cheque_date=transactions_details.date,
-                                        posting_date=transactions_details.date,
-                                        cheque_no=cheque_no,
-                                        user_remark=transactions_details.description,
-                                        entries=entries,
-                                        voucher_type=("Credit Card Entry" if is_credit_card else "Bank Entry"))
-        
-        output.append(final_transaction)
-    
-    return output
+                entries.append({
+                    "account": account,
+                    "party_type": party_type if party else None,
+                    "party": party,
+                    "debit": 0,
+                    "credit": transactions_details.unallocated_amount,
+                })
+
+            return create_bank_entry_and_reconcile(bank_transaction_name=bank_transaction,
+                                            cheque_date=transactions_details.date,
+                                            posting_date=transactions_details.date,
+                                            cheque_no=cheque_no,
+                                            user_remark=transactions_details.description,
+                                            entries=entries,
+                                            voucher_type=("Credit Card Entry" if is_credit_card else "Bank Entry"))
+
+        run_bulk_item(bank_transaction, action, results, errors)
+
+    return {
+        "results": results,
+        "errors": errors,
+    }
 
 
 
@@ -521,62 +564,70 @@ def create_bulk_payment_entry_and_reconcile(bank_transaction_names: list[str | i
 
     validate_bulk_allocations(transactions, references_by_transaction)
 
-    output = []
+    results = []
+    errors = []
 
     for bank_transaction_name in bank_transaction_names:
-        bank_transaction = transactions[str(bank_transaction_name)]
 
-        transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
-        company = frappe.get_cached_value("Account", transaction_account, "company")
+        def action(bank_transaction_name=bank_transaction_name):
+            bank_transaction = transactions[str(bank_transaction_name)]
 
-        is_withdrawal = bank_transaction.withdrawal > 0.0
+            transaction_account = frappe.get_cached_value("Bank Account", bank_transaction.bank_account, "account")
+            company = frappe.get_cached_value("Account", transaction_account, "company")
 
-        if is_withdrawal:
-            paid_from = transaction_account
-            paid_to = account
-        else:
-            paid_from = account
-            paid_to = transaction_account
-        
-        payment_entry_doc = frappe.get_doc({
-            "doctype": "Payment Entry",
-            "payment_type": "Pay" if is_withdrawal else "Receive",
-            "bank_account": bank_transaction.bank_account,
-            "company": company,
-            "mode_of_payment": mode_of_payment,
-            "party_type": party_type,
-            "party": party,
-            "paid_from": paid_from,
-            "paid_to": paid_to,
-            "paid_amount": bank_transaction.unallocated_amount,
-            "base_paid_amount": bank_transaction.unallocated_amount,
-            "received_amount": bank_transaction.unallocated_amount,
-            "base_received_amount": bank_transaction.unallocated_amount,
-            "target_exchange_rate": 1,
-            "source_exchange_rate": 1,
-            "reference_date": bank_transaction.date,
-            "posting_date": bank_transaction.date,
-            "reference_no": (bank_transaction.reference_number or bank_transaction.description or '')[:140],
-            # The invoices this transaction settles, if any were allocated. Payment Entry derives
-            # total_allocated_amount and unallocated_amount from these on validate.
-            "references": references_by_transaction.get(str(bank_transaction_name), []),
-        })
+            is_withdrawal = bank_transaction.withdrawal > 0.0
 
-        payment_entry_doc.insert()
-        payment_entry_doc.submit()
+            if is_withdrawal:
+                paid_from = transaction_account
+                paid_to = account
+            else:
+                paid_from = account
+                paid_to = transaction_account
 
-        final_transaction = reconcile_vouchers(bank_transaction_name, json.dumps([{
-            "payment_doctype": "Payment Entry",
-            "payment_name": payment_entry_doc.name,
-            "amount": payment_entry_doc.paid_amount,
-        }]), is_new_voucher=True)
+            payment_entry_doc = frappe.get_doc({
+                "doctype": "Payment Entry",
+                "payment_type": "Pay" if is_withdrawal else "Receive",
+                "bank_account": bank_transaction.bank_account,
+                "company": company,
+                "mode_of_payment": mode_of_payment,
+                "party_type": party_type,
+                "party": party,
+                "paid_from": paid_from,
+                "paid_to": paid_to,
+                "paid_amount": bank_transaction.unallocated_amount,
+                "base_paid_amount": bank_transaction.unallocated_amount,
+                "received_amount": bank_transaction.unallocated_amount,
+                "base_received_amount": bank_transaction.unallocated_amount,
+                "target_exchange_rate": 1,
+                "source_exchange_rate": 1,
+                "reference_date": bank_transaction.date,
+                "posting_date": bank_transaction.date,
+                "reference_no": (bank_transaction.reference_number or bank_transaction.description or '')[:140],
+                # The invoices this transaction settles, if any were allocated. Payment Entry derives
+                # total_allocated_amount and unallocated_amount from these on validate.
+                "references": references_by_transaction.get(str(bank_transaction_name), []),
+            })
 
-        output.append({
-            "transaction": final_transaction,
-            "payment_entry": payment_entry_doc,
-        })
+            payment_entry_doc.insert()
+            payment_entry_doc.submit()
 
-    return output
+            final_transaction = reconcile_vouchers(bank_transaction_name, json.dumps([{
+                "payment_doctype": "Payment Entry",
+                "payment_name": payment_entry_doc.name,
+                "amount": payment_entry_doc.paid_amount,
+            }]), is_new_voucher=True)
+
+            return {
+                "transaction": final_transaction,
+                "payment_entry": payment_entry_doc,
+            }
+
+        run_bulk_item(bank_transaction_name, action, results, errors)
+
+    return {
+        "results": results,
+        "errors": errors,
+    }
 
     
 @frappe.whitelist(methods=['POST'])

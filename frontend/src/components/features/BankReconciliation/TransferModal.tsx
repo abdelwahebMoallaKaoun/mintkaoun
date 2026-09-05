@@ -2,7 +2,7 @@ import { useAtom, useAtomValue, useSetAtom } from 'jotai'
 import { bankRecSelectedTransactionAtom, bankRecTransferModalAtom, bankRecUnreconcileModalAtom, SelectedBank, selectedBankAccountAtom } from './bankRecAtoms'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogClose, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import _ from '@/lib/translate'
-import { UnreconciledTransaction, useGetBankAccounts, useGetRuleForTransaction, useRefreshUnreconciledTransactions, useUpdateActionLog } from './utils'
+import { BulkActionResponse, showBulkActionErrorToast, UnreconciledTransaction, useGetBankAccounts, useGetRuleForTransaction, useRefreshUnreconciledTransactions, useUpdateActionLog } from './utils'
 import { Button } from '@/components/ui/button'
 import SelectedTransactionDetails from './SelectedTransactionDetails'
 import { PaymentEntry } from '@/types/Accounts/PaymentEntry'
@@ -75,7 +75,7 @@ const BulkInternalTransferForm = ({ transactions }: { transactions: Unreconciled
 
     const setIsOpen = useSetAtom(bankRecTransferModalAtom)
 
-    const { call: createPaymentEntry, loading, error } = useFrappePostCall<{ message: { transaction: BankTransaction, payment_entry: PaymentEntry }[] }>('mint.apis.bank_reconciliation.create_bulk_internal_transfer')
+    const { call: createPaymentEntry, loading, error } = useFrappePostCall<{ message: BulkActionResponse<{ transaction: BankTransaction, payment_entry: PaymentEntry }> }>('mint.apis.bank_reconciliation.create_bulk_internal_transfer')
 
     const onReconcile = useRefreshUnreconciledTransactions()
     const addToActionLog = useUpdateActionLog()
@@ -86,29 +86,43 @@ const BulkInternalTransferForm = ({ transactions }: { transactions: Unreconciled
             bank_transaction_names: transactions.map((transaction) => transaction.name),
             bank_account: data.bank_account
         }).then(({ message }) => {
-            addToActionLog({
-                type: 'transfer',
-                timestamp: (new Date()).getTime(),
-                isBulk: true,
-                items: message.map((item) => ({
-                    bankTransaction: item.transaction,
-                    voucher: {
-                        reference_doctype: "Payment Entry",
-                        reference_name: item.payment_entry.name,
-                        posting_date: item.payment_entry.posting_date,
-                        doc: item.payment_entry,
+
+            // Each transaction is committed on its own, so the batch can partially succeed
+            const { results, errors } = message
+
+            if (results.length > 0) {
+                addToActionLog({
+                    type: 'transfer',
+                    timestamp: (new Date()).getTime(),
+                    isBulk: true,
+                    items: results.map((item) => ({
+                        bankTransaction: item.transaction,
+                        voucher: {
+                            reference_doctype: "Payment Entry",
+                            reference_name: item.payment_entry.name,
+                            posting_date: item.payment_entry.posting_date,
+                            doc: item.payment_entry,
+                        }
+                    })),
+                    bulkCommonData: {
+                        bank_account: data.bank_account,
                     }
-                })),
-                bulkCommonData: {
-                    bank_account: data.bank_account,
-                }
-            })
-            toast.success(_("Transfer Recorded"), {
-                duration: 4000,
-                closeButton: true,
-            })
+                })
+                toast.success(_("Transfer Recorded"), {
+                    duration: 4000,
+                    closeButton: true,
+                })
+            }
+
+            showBulkActionErrorToast(errors)
+
             onReconcile(transactions[transactions.length - 1])
             setIsOpen(false)
+        }).catch(() => {
+            // The whole request failed - ErrorBanner shows why, and the modal stays open so the
+            // user can retry. Refresh the list anyway: transactions committed before the failure
+            // may already be reconciled.
+            onReconcile(transactions[transactions.length - 1])
         })
 
     }
