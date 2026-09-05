@@ -81,6 +81,45 @@ export const useGetAccountClosingBalanceAsPerStatement = (swrConfig: SWRConfigur
     })
 }
 
+/**
+ * A single failed item of a bulk action.
+ *
+ * The bulk endpoints commit each transaction on its own, so a batch can partially succeed:
+ * the response carries the successes in `results` and one of these per failed transaction.
+ */
+export interface BulkActionError {
+    bank_transaction: string,
+    error: string,
+}
+
+/**
+ * Response shape of every bulk bank reconciliation endpoint.
+ */
+export interface BulkActionResponse<T> {
+    results: T[],
+    errors: BulkActionError[],
+}
+
+/**
+ * Show a single toast naming the transactions a bulk action could not process.
+ *
+ * Bulk actions commit one transaction at a time, so the rest of the batch still went through -
+ * the toast has to name the failures rather than fail the whole run.
+ */
+export const showBulkActionErrorToast = (errors: BulkActionError[]) => {
+
+    if (errors.length === 0) return
+
+    toast.error(_("{0} of the selected transactions could not be processed", [errors.length.toString()]), {
+        duration: 8000,
+        closeButton: true,
+        // One line per failed transaction. Sonner renders the description in its own element,
+        // but sets no white-space of its own, so pre-line on the toast container is inherited.
+        style: { whiteSpace: 'pre-line' },
+        description: errors.map((e) => `${e.bank_transaction}: ${e.error}`).join('\n'),
+    })
+}
+
 export type UnreconciledTransaction = Pick<BankTransaction, 'name' | 'matched_rule' | 'date' | 'withdrawal' | 'deposit' | 'currency' | 'description' | 'status' | 'transaction_type' | 'reference_number' | 'party_type' | 'party' | 'bank_account' | 'company' | 'unallocated_amount'>
 
 

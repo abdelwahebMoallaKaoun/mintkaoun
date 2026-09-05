@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Bulk reconciliation actions no longer block every other document creation on the site for the duration of the run (ACC-1607). `create_bulk_internal_transfer`, `create_bulk_bank_entry_and_reconcile` and `create_bulk_payment_entry_and_reconcile` inserted, submitted and reconciled every selected transaction inside a single request-long database transaction. Each Payment Entry / Journal Entry insert takes a `FOR UPDATE` lock on its naming series row in `tabSeries`, and InnoDB holds that lock until commit — so the first insert of a bulk run held the series for the whole request and any concurrent insert of the same doctype, anywhere on the site, waited 50 seconds and failed with `Lock wait timeout exceeded; try restarting transaction`. Each transaction is now committed as soon as its voucher is created, submitted and reconciled, which releases the naming series between items.
+- A failing transaction in a bulk run no longer discards the whole batch (ACC-1607). Because items are now committed one at a time, a failure rolls back only that item; the ones already done stay reconciled, the run continues with the rest, and the full traceback is written to the Error Log. The bulk endpoints return `{"results": [...], "errors": [...]}` instead of a bare list, and the dialogs log only the successes to the action log and raise a toast naming the transactions that failed. A dialog now closes only when at least one transaction went through, so a run that fails outright keeps the form — and, for a payment, the per-transaction invoice allocations — intact for a retry. The bulk dialogs also handle a rejected request instead of leaving an unhandled promise rejection: the transaction list refreshes, the failure is logged and surfaced as a toast, and the error banner explains what went wrong.
+
 ## [1.7.0] - 2026-08-21
 
 ### Added
