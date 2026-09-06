@@ -1,6 +1,6 @@
 {
   "name": "mint",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "description": "Bank reconciliation made simple for ERPNext",
   "main": "index.js",
   "scripts": {
