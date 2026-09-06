@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Removed a redundant `frappe.db.commit()` from the bulk reconciliation error path (ACC-1607). It was added on the assumption that the Error Log row written after a rollback would be wiped by the next failing item's rollback. It would not: `tabError Log` is declared MyISAM upstream, so the write is non-transactional and survives regardless. The commit was dead code and the comment justifying it was wrong; both are gone. No behaviour change.
+
 ## [1.7.1] - 2026-09-06
 
 ### Fixed

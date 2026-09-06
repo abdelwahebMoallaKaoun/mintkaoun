@@ -180,14 +180,14 @@ def run_bulk_item(bank_transaction_name: str | int, action, results: list, error
             del frappe.local.message_log[message_log_depth:]
             # Rolls back to the previous item's commit, so items already done survive.
             frappe.db.rollback()
+            # No commit is needed to keep this row: `tabError Log` is declared MyISAM in frappe's
+            # error_log.json, so the write is non-transactional and the next item's rollback
+            # cannot take it back. Checked on frappe v16.22.0 by reading the engine out of
+            # information_schema and by failing two items in a row - both tracebacks survived.
             frappe.log_error(
                 title=f"Mint bulk reconciliation failed: {bank_transaction_name}"[:140],
                 message=frappe.get_traceback(),
             )
-            # The Error Log row lands in the transaction the rollback just re-opened. Without this
-            # commit the next failing item's rollback would wipe it, so a run where several items
-            # fail in a row would keep only the last traceback.
-            frappe.db.commit()
         except Exception:
             # A dead connection makes the recovery itself raise. The loop has to survive that:
             # otherwise the caller gets a bare 500 and cannot tell which items already committed.
